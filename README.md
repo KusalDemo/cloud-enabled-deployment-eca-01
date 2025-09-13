@@ -1,4 +1,4 @@
-# Cloud Enabled Deployment In Action with AWS
+# Cloud Enabled Deployment In Action with GCP
 
 This repository contains four projects:
 
@@ -50,3 +50,301 @@ This repository contains four projects:
 
 - Backend: run `mvn -q -e -DskipTests package` at repo root to build services.
 - Frontend: run `npm install` then `npm run dev` inside `frontend-app`.
+
+## Google Cloud Platform (GCP) Deployment
+
+### GCP Project Setup
+
+**Project ID:** `eca-cloud-deployment-project`
+**Region:** `us-central1` (Iowa)
+
+### 1. Course Service - Google Cloud SQL (MySQL) Configuration
+
+#### Cloud SQL Instance Specifications:
+- **vCPUs:** 1
+- **Memory:** 3.75 GB
+- **SSD Storage:** 10 GB
+- **Database Version:** MySQL 8.0.41
+- **Auto Storage Increase:** Enabled
+- **Location:** us-central1-c
+- **Port:** 3306 (default MySQL port)
+
+#### Why These Specifications?
+- **1 vCPU + 3.75GB RAM:** Sufficient for development/testing workloads. MySQL requires adequate memory for query processing and caching.
+- **10GB SSD:** Provides fast I/O operations for database transactions. SSDs offer better performance than HDDs for database workloads.
+- **Auto Storage Increase:** Prevents service interruption when storage fills up, automatically scaling as data grows.
+- **us-central1-c:** Chosen for low latency and cost optimization in the US region.
+
+#### Application Configuration (`application-gcp.properties`):
+```properties
+spring.datasource.host=google
+spring.datasource.project-id=eca-cloud-deployment-project
+spring.datasource.region=us-central1
+spring.datasource.instance-name=course-db-instance
+spring.datasource.database=eca_courses
+
+spring.datasource.cloud-sql-instance=${spring.datasource.project-id}:${spring.datasource.region}:${spring.datasource.instance-name}
+
+spring.datasource.url=jdbc:mysql://${spring.datasource.host}/${spring.datasource.database}?cloudSqlInstance=${spring.datasource.cloud-sql-instance}&socketFactory=com.google.cloud.sql.mysql.SocketFactory&useSSL=false
+
+spring.datasource.username=<your-mysql-username>
+spring.datasource.password=<your-mysql-password>
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+spring.jpa.database-platform=org.hibernate.dialect.MySQL8Dialect
+```
+
+#### Configuration Explanation:
+- **`spring.datasource.host=google`:** Tells Spring Boot to use Google Cloud SQL proxy for secure connection
+- **`cloud-sql-instance`:** Full instance connection string format: `project-id:region:instance-name`
+- **`socketFactory=com.google.cloud.sql.mysql.SocketFactory`:** Enables secure connection through Cloud SQL proxy without exposing database to public internet
+- **`useSSL=false`:** Cloud SQL proxy handles encryption, so direct SSL is not needed
+- **`MySQL8Dialect`:** Hibernate dialect specifically for MySQL 8.0 features and syntax
+
+### 2. Student Service - MongoDB Atlas Configuration
+
+#### MongoDB Atlas Cluster Specifications:
+- **Region:** Iowa (us-central1)
+- **Version:** 8.0.13
+- **Tier:** Free tier cluster
+- **Cluster Name:** ECAStudentCluster
+
+#### Why These Specifications?
+- **Free Tier:** Cost-effective for development and learning purposes
+- **Iowa Region:** Consistent with other services for low latency and data locality
+- **MongoDB 8.0.13:** Latest stable version with improved performance and security features
+
+#### Application Configuration (`application-gcp.properties`):
+```properties
+spring.data.mongodb.host=<your-cluster-name>.kmci8c0.mongodb.net
+spring.data.mongodb.username=<your-mongodb-username>
+spring.data.mongodb.password=<your-mongodb-password>
+spring.data.mongodb.database=eca
+spring.data.mongodb.port=27017
+
+spring.data.mongodb.app-name=ECAStudentCluster
+
+spring.data.mongodb.uri=mongodb+srv://${spring.data.mongodb.username}:${spring.data.mongodb.password}@${spring.data.mongodb.host}/${spring.data.mongodb.database}?appName=${spring.data.mongodb.app-name}
+```
+
+#### Configuration Explanation:
+- **`spring.data.mongodb.host`:** MongoDB Atlas cluster endpoint. The `.kmci8c0.mongodb.net` is Atlas's domain for secure connections
+- **`spring.data.mongodb.port=27017`:** Standard MongoDB port, though Atlas uses SRV records for connection discovery
+- **`spring.data.mongodb.app-name`:** Identifies the application in MongoDB Atlas monitoring and logs
+- **`mongodb+srv://`:** SRV connection string format that automatically handles replica set discovery and load balancing
+- **`appName` parameter:** Helps with connection monitoring and debugging in Atlas dashboard
+
+
+### Deployment Process
+
+## Method 1: Google Cloud Console (GUI) + MongoDB Atlas (GUI)
+
+### Step 1: Google Cloud Console Setup
+
+#### 1.1 Enable Required APIs
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Select project: `eca-cloud-deployment-project`
+3. Navigate to **APIs & Services** → **Library**
+4. Search and enable these APIs:
+   - **Cloud SQL Admin API**
+   - **Cloud Storage API** 
+   - **Cloud Run Admin API**
+   - **Cloud Build API**
+
+#### 1.2 Create Cloud SQL Instance (MySQL)
+1. Navigate to **SQL** in the left menu
+2. Click **Create Instance**
+3. Choose **MySQL**
+4. Configure instance:
+   - **Instance ID:** `course-db-instance`
+   - **Password:** `Solution@123`
+   - **Database version:** `MySQL 8.0`
+   - **Region:** `us-central1 (Iowa)`
+   - **Zone:** `us-central1-c`
+5. In **Machine type and storage:**
+   - **Machine type:** `db-f1-micro` (1 vCPU, 3.75 GB RAM)
+   - **Storage type:** `SSD persistent disk`
+   - **Storage capacity:** `10 GB`
+   - **Enable storage auto-increase:**Checked**
+6. Click **Create** (takes 5-10 minutes)
+
+#### 1.3 Create Database and User
+1. Once instance is ready, click on `course-db-instance`
+2. Go to **Databases** tab → **Create database**
+   - **Database name:** `eca_courses`
+3. Go to **Users** tab → **Add user account**
+   - **Username:** `<your-mysql-username>`
+   - **Password:** `<your-mysql-password>`
+   - **Host name:** `%` (allows from any host)
+
+#### 1.4 Deploy Services to Cloud Run
+1. Navigate to **Cloud Run** → **Create Service**
+2. For each service (course-service, student-service):
+   - **Service name:** `course-service` (or respective name)
+   - **Region:** `us-central1`
+   - **Deploy from source:** Upload your service folder
+   - **Authentication:** Allow unauthenticated invocations
+   - Click **Deploy**
+
+### Step 2: MongoDB Atlas Setup
+
+#### 2.1 Create MongoDB Atlas Account
+1. Go to [MongoDB Atlas](https://www.mongodb.com/atlas)
+2. Sign up/Login with your account
+3. Create a new project: `ECA Cloud Deployment`
+
+#### 2.2 Create Free Tier Cluster
+1. Click **Build a Database**
+2. Choose **FREE** tier (M0 Sandbox)
+3. Configure cluster:
+   - **Provider:** GCP-backed
+   - **Region:** `us-central1 (Iowa)`
+   - **Cluster name:** `ECASTudentCluster`
+4. Click **Create Cluster**
+
+#### 2.3 Configure Database Access
+1. Go to **Database Access** → **Add New Database User**
+2. Create user:
+   - **Username:** `<your-mongodb-username>`
+   - **Password:** `<your-mongodb-password>`
+   - **Database User Privileges:** `Read and write to any database`
+3. Click **Add User**
+
+#### 2.4 Configure Network Access
+1. Go to **Network Access** → **Add IP Address**
+2. Choose **Allow access from anywhere** (0.0.0.0/0)
+3. Click **Confirm**
+
+#### 2.5 Get Connection String
+1. Go to **Database** → **Connect**
+2. Choose **Connect your application**
+3. Copy the connection string: `mongodb+srv://<your-mongodb-username>:<your-mongodb-password>@<your-cluster-name>.kmci8c0.mongodb.net/eca?appName=ECAStudentCluster`
+
+## Method 2: Command Line Interface (CLI)
+
+### Prerequisites
+```bash
+# Install Google Cloud SDK
+curl https://sdk.cloud.google.com | bash
+exec -l $SHELL
+
+# Install MongoDB CLI (optional)
+brew install mongodb/brew/mongodb-database-tools
+```
+
+### Step 1: Google Cloud Setup
+
+#### 1.1 Authentication and Project Setup
+```bash
+# Login to Google Cloud
+gcloud auth login
+
+# Set default project
+gcloud config set project eca-cloud-deployment-project
+
+# Verify project
+gcloud config get-value project
+```
+
+#### 1.2 Enable Required APIs
+```bash
+# Enable all required APIs at once
+gcloud services enable sqladmin.googleapis.com storage.googleapis.com run.googleapis.com cloudbuild.googleapis.com
+
+# Verify APIs are enabled
+gcloud services list --enabled
+```
+
+#### 1.3 Create Cloud SQL Instance
+```bash
+# Create MySQL instance with exact specifications
+gcloud sql instances create course-db-instance \
+    --database-version=MYSQL_8_0 \
+    --tier=db-f1-micro \
+    --region=us-central1 \
+    --storage-type=SSD \
+    --storage-size=10GB \
+    --storage-auto-increase \
+    --root-password=Solution@123
+
+# Check instance status
+gcloud sql instances describe course-db-instance
+```
+
+**CLI Explanation:**
+- `--database-version=MYSQL_8_0`: Specifies MySQL 8.0.41 version
+- `--tier=db-f1-micro`: Sets 1 vCPU, 3.75GB RAM configuration
+- `--region=us-central1`: Deploys in Iowa region for consistency
+- `--storage-type=SSD`: Uses SSD for better performance
+- `--storage-size=10GB`: Sets initial storage to 10GB
+- `--storage-auto-increase`: Enables automatic storage scaling
+
+#### 1.4 Create Database and User
+```bash
+# Create database
+gcloud sql databases create eca_courses --instance=course-db-instance
+
+# Create database user
+gcloud sql users create <your-mysql-username> \
+    --instance=course-db-instance \
+    --password=<your-mysql-password>
+
+# Verify database and user
+gcloud sql databases list --instance=course-db-instance
+gcloud sql users list --instance=course-db-instance
+```
+
+
+### Step 2: Deploy Services to Cloud Run
+
+#### 2.1 Deploy Course Service
+```bash
+# Navigate to course service
+cd course-service
+
+# Deploy to Cloud Run
+gcloud run deploy course-service \
+    --source . \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars SPRING_PROFILES_ACTIVE=gcp
+
+# Get service URL
+gcloud run services describe course-service --region=us-central1 --format="value(status.url)"
+```
+
+#### 2.2 Deploy Student Service
+```bash
+# Navigate to student service
+cd ../student-service
+
+# Deploy to Cloud Run
+gcloud run deploy student-service \
+    --source . \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars SPRING_PROFILES_ACTIVE=gcp
+
+# Get service URL
+gcloud run services describe student-service --region=us-central1 --format="value(status.url)"
+```
+
+
+**CLI Explanation:**
+- `--source .`: Builds and deploys from current directory
+- `--platform managed`: Uses fully managed Cloud Run
+- `--region us-central1`: Deploys in Iowa region
+- `--allow-unauthenticated`: Makes service publicly accessible
+- `--set-env-vars SPRING_PROFILES_ACTIVE=gcp`: Activates GCP profile
+
+
+### Why This Way?
+
+1. **Microservices on Cloud Run:** Serverless, auto-scaling, pay-per-use model
+2. **Managed Databases:** Cloud SQL and MongoDB Atlas handle backups, updates, and maintenance
+3. **Regional Consistency:** All services in us-central1 for low latency
+4. **Security:** Cloud SQL proxy and MongoDB SRV connections ensure secure data transmission
+5. **Cost Optimization:** Free tier MongoDB, minimal Cloud SQL instance, and serverless compute
+
