@@ -37,7 +37,8 @@ This repository contains four projects:
   - GET /files/{id} (fetch)
   - DELETE /files/{id} (delete)
 - Default port: 8083
-- Uses local disk storage at `./data/media` by default (override with env var `MEDIA_STORAGE_DIR`).
+- Uses local disk storage at `./data/media` by default (override with env var `MEDIA_STORAGE_DIR`)
+- Supports Google Cloud Storage when `gcp` profile is active
 
 ## Frontend (frontend-app)
 - React + TypeScript + MUI + Axios + Vite app with 3 sections: Courses, Students, Media
@@ -134,6 +135,70 @@ spring.data.mongodb.uri=mongodb+srv://${spring.data.mongodb.username}:${spring.d
 - **`mongodb+srv://`:** SRV connection string format that automatically handles replica set discovery and load balancing
 - **`appName` parameter:** Helps with connection monitoring and debugging in Atlas dashboard
 
+### 3. Media Service - Google Cloud Storage Configuration
+
+#### Google Cloud Storage Bucket Specifications:
+- **Bucket Name:** `eca-cloud-deployment-media-bucket` (must be globally unique)
+- **Location Type:** Regional
+- **Region:** `us-central1` (Iowa)
+- **Storage Class:** Standard (for frequently accessed files)
+- **Access Control:** Uniform (recommended)
+- **Public Access:** Enabled for object viewing
+
+#### Why These Specifications?
+- **Regional Storage:** Better performance and lower latency for applications in the same region
+- **Standard Storage Class:** Optimized for frequently accessed files with high availability
+- **Uniform Access Control:** Simplified permission management across all objects
+- **Public Access:** Allows direct access to media files via URLs without authentication
+
+#### Application Configuration (`application-gcp.properties`):
+```properties
+# Google Cloud Storage Configuration
+spring.cloud.gcp.storage.bucket-name=eca-cloud-deployment-media-bucket
+spring.cloud.gcp.storage.project-id=eca-cloud-deployment-project
+
+# Service Account Authentication
+spring.cloud.gcp.credentials.location=/path/to/your/service-account-key.json
+
+# Storage Configuration
+spring.cloud.gcp.storage.auto-create-bucket=false
+```
+
+#### Configuration Explanation:
+- **`spring.cloud.gcp.storage.bucket-name`:** Name of the GCS bucket for storing media files
+- **`spring.cloud.gcp.storage.project-id`:** GCP project ID where the bucket is located
+- **`spring.cloud.gcp.credentials.location`:** Path to the service account JSON key file for authentication
+- **`spring.cloud.gcp.storage.auto-create-bucket=false`:** Prevents automatic bucket creation (bucket must exist beforehand)
+
+#### Service Account Setup:
+1. **Create Service Account:**
+   - Go to IAM & Admin → Service Accounts
+   - Create service account: `media-service-account`
+   - Assign roles: `Storage Object Admin` and `Storage Object Viewer`
+
+2. **Download Service Account Key:**
+   - Create and download JSON key file
+   - Store securely and never commit to version control
+
+3. **Bucket Permissions:**
+   - Add `allUsers` with `Storage Object Viewer` role for public access
+   - This allows direct URL access to uploaded files
+
+#### Maven Dependencies:
+The media service includes the Google Cloud Storage dependency:
+```xml
+<dependency>
+    <groupId>com.google.cloud</groupId>
+    <artifactId>google-cloud-storage</artifactId>
+    <version>2.56.0</version>
+</dependency>
+```
+
+#### Environment Variables for Cloud Run:
+When deploying to Cloud Run, set these environment variables:
+- `SPRING_PROFILES_ACTIVE=gcp` - Activates GCP profile
+- `GOOGLE_APPLICATION_CREDENTIALS=/app/media-service-key.json` - Path to service account key
+
 
 ### Deployment Process
 
@@ -177,9 +242,50 @@ spring.data.mongodb.uri=mongodb+srv://${spring.data.mongodb.username}:${spring.d
    - **Password:** `<your-mysql-password>`
    - **Host name:** `%` (allows from any host)
 
-#### 1.4 Deploy Services to Cloud Run
+#### 1.4 Create Cloud Storage Bucket
+1. Navigate to **Cloud Storage** → **Buckets**
+2. Click **Create Bucket**
+3. Configure bucket:
+   - **Name:** `eca-cloud-deployment-media-bucket` (must be globally unique)
+   - **Location type:** Regional
+   - **Region:** `us-central1` (Iowa)
+   - **Storage class:** Standard
+   - **Access control:** Uniform
+4. Click **Create**
+
+#### 1.5 Create Service Account for Media Service
+1. Go to **IAM & Admin** → **Service Accounts**
+2. Click **Create Service Account**
+3. Fill in details:
+   - **Service account name:** `media-service-account`
+   - **Description:** Service account for media service to access Cloud Storage
+4. Click **Create and Continue**
+5. Assign roles:
+   - **Storage Object Admin** (for full bucket access)
+   - **Storage Object Viewer** (for read access)
+6. Click **Continue** → **Done**
+
+#### 1.6 Download Service Account Key
+1. Click on `media-service-account`
+2. Go to **Keys** tab
+3. Click **Add Key** → **Create new key**
+4. Choose **JSON** format
+5. Click **Create** - download the JSON file
+6. **Important:** Keep this file secure and never commit to version control
+
+#### 1.7 Set Bucket Permissions for Public Access
+1. Go to **Cloud Storage** → **Buckets**
+2. Click on `eca-cloud-deployment-media-bucket`
+3. Go to **Permissions** tab
+4. Click **Add Principal**
+5. Add member:
+   - **New members:** `allUsers`
+   - **Role:** `Storage Object Viewer`
+6. Click **Save**
+
+#### 1.8 Deploy Services to Cloud Run
 1. Navigate to **Cloud Run** → **Create Service**
-2. For each service (course-service, student-service):
+2. For each service (course-service, student-service, media-service):
    - **Service name:** `course-service` (or respective name)
    - **Region:** `us-central1`
    - **Deploy from source:** Upload your service folder
@@ -294,6 +400,64 @@ gcloud sql databases list --instance=course-db-instance
 gcloud sql users list --instance=course-db-instance
 ```
 
+#### 1.5 Create Cloud Storage Bucket
+```bash
+# Create storage bucket
+gsutil mb -p eca-cloud-deployment-project -c STANDARD -l us-central1 gs://eca-cloud-deployment-media-bucket
+
+# Verify bucket creation
+gsutil ls -L -b gs://eca-cloud-deployment-media-bucket
+```
+
+**CLI Explanation:**
+- `gsutil mb`: Creates a new bucket
+- `-p eca-cloud-deployment-project`: Specifies the project ID
+- `-c STANDARD`: Sets storage class to Standard
+- `-l us-central1`: Sets location to Iowa region
+- `gs://eca-cloud-deployment-media-bucket`: Bucket name (must be globally unique)
+
+#### 1.6 Create Service Account for Media Service
+```bash
+# Create service account
+gcloud iam service-accounts create media-service-account \
+    --display-name="Media Service Account" \
+    --description="Service account for media service to access Cloud Storage"
+
+# Assign Storage Object Admin role
+gcloud projects add-iam-policy-binding eca-cloud-deployment-project \
+    --member="serviceAccount:media-service-account@eca-cloud-deployment-project.iam.gserviceaccount.com" \
+    --role="roles/storage.objectAdmin"
+
+# Assign Storage Object Viewer role
+gcloud projects add-iam-policy-binding eca-cloud-deployment-project \
+    --member="serviceAccount:media-service-account@eca-cloud-deployment-project.iam.gserviceaccount.com" \
+    --role="roles/storage.objectViewer"
+
+# Create and download service account key
+gcloud iam service-accounts keys create ./media-service-key.json \
+    --iam-account=media-service-account@eca-cloud-deployment-project.iam.gserviceaccount.com
+```
+
+**CLI Explanation:**
+- `gcloud iam service-accounts create`: Creates a new service account
+- `gcloud projects add-iam-policy-binding`: Assigns IAM roles to the service account
+- `roles/storage.objectAdmin`: Full access to storage objects (create, read, update, delete)
+- `roles/storage.objectViewer`: Read-only access to storage objects
+- `gcloud iam service-accounts keys create`: Creates and downloads the JSON key file
+
+#### 1.7 Set Bucket Permissions for Public Access
+```bash
+# Make bucket publicly readable
+gsutil iam ch allUsers:objectViewer gs://eca-cloud-deployment-media-bucket
+
+# Verify bucket permissions
+gsutil iam get gs://eca-cloud-deployment-media-bucket
+```
+
+**CLI Explanation:**
+- `gsutil iam ch allUsers:objectViewer`: Grants public read access to all objects in the bucket
+- `gsutil iam get`: Shows current IAM permissions for the bucket
+
 
 ### Step 2: Deploy Services to Cloud Run
 
@@ -331,6 +495,34 @@ gcloud run deploy student-service \
 gcloud run services describe student-service --region=us-central1 --format="value(status.url)"
 ```
 
+#### 2.3 Deploy Media Service
+```bash
+# Navigate to media service
+cd ../media-service
+
+# Deploy to Cloud Run with service account key
+gcloud run deploy media-service \
+    --source . \
+    --platform managed \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --set-env-vars SPRING_PROFILES_ACTIVE=gcp \
+    --set-env-vars GOOGLE_APPLICATION_CREDENTIALS=/app/media-service-key.json
+
+# Upload service account key as a secret
+gcloud run services update media-service \
+    --region=us-central1 \
+    --update-secrets=GOOGLE_APPLICATION_CREDENTIALS=media-service-key:latest
+
+# Get service URL
+gcloud run services describe media-service --region=us-central1 --format="value(status.url)"
+```
+
+**CLI Explanation:**
+- `--set-env-vars SPRING_PROFILES_ACTIVE=gcp`: Activates GCP profile for Cloud Storage integration
+- `--set-env-vars GOOGLE_APPLICATION_CREDENTIALS`: Points to the service account key file
+- `--update-secrets`: Securely mounts the service account key as a secret in the container
+
 
 **CLI Explanation:**
 - `--source .`: Builds and deploys from current directory
@@ -344,7 +536,9 @@ gcloud run services describe student-service --region=us-central1 --format="valu
 
 1. **Microservices on Cloud Run:** Serverless, auto-scaling, pay-per-use model
 2. **Managed Databases:** Cloud SQL and MongoDB Atlas handle backups, updates, and maintenance
-3. **Regional Consistency:** All services in us-central1 for low latency
-4. **Security:** Cloud SQL proxy and MongoDB SRV connections ensure secure data transmission
-5. **Cost Optimization:** Free tier MongoDB, minimal Cloud SQL instance, and serverless compute
+3. **Cloud Storage Integration:** Google Cloud Storage provides scalable, durable file storage with global CDN
+4. **Regional Consistency:** All services in us-central1 for low latency and data locality
+5. **Security:** Cloud SQL proxy, MongoDB SRV connections, and service account authentication ensure secure data transmission
+6. **Cost Optimization:** Free tier MongoDB, minimal Cloud SQL instance, serverless compute, and pay-per-use storage
+7. **Public Access:** Direct URL access to media files without authentication overhead for better performance
 
