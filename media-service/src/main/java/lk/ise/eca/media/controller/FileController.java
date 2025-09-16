@@ -1,5 +1,9 @@
 package lk.ise.eca.media.controller;
 
+import com.google.cloud.storage.BlobInfo;
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
+import org.springframework.core.env.Environment;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -24,11 +28,18 @@ import java.util.stream.Collectors;
 public class FileController {
 
     private final Path storageDir;
+    private final Storage storage;
+    private final String bucketName;
+    private final Environment environment;
 
-    public FileController() throws IOException {
+    public FileController(Environment environment) throws IOException {
+        this.environment = environment;
         String configured = System.getenv().getOrDefault("MEDIA_STORAGE_DIR", "./data/media");
         this.storageDir = Paths.get(configured).toAbsolutePath().normalize();
         Files.createDirectories(this.storageDir);
+
+        this.storage = StorageOptions.getDefaultInstance().getService();
+        this.bucketName = "eca-cloud-deployment-media-bucket";
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -39,19 +50,27 @@ public class FileController {
         String original = StringUtils.cleanPath(Objects.requireNonNull(file.getOriginalFilename()));
         String id = UUID.randomUUID().toString();
         String storedName = id + "__" + original;
-        Path target = storageDir.resolve(storedName);
-        try {
-            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "failed to store file"));
+
+        if (Arrays.asList(environment.getActiveProfiles()).contains("gcp")) {
+            BlobInfo blobInfo = BlobInfo.newBuilder(bucketName, storedName).build();
+            storage.create(blobInfo, file.getInputStream());
+            String url = String.format("https://storage.googleapis.com/%s/%s", bucketName, storedName);
+            return ResponseEntity.ok(Map.of("id", id, "filename", original, "url", url));
+        } else {
+            Path target = storageDir.resolve(storedName);
+            try {
+                Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException e) {
+                return ResponseEntity.internalServerError().body(Map.of("error", "failed to store file"));
+            }
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("id", id);
+            resp.put("filename", original);
+            resp.put("url", ServletUriComponentsBuilder
+                    .fromCurrentContextPath()
+                    .path("/files/%s-%s".formatted(id, original)).build().toUriString());
+            return ResponseEntity.ok(resp);
         }
-        Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("id", id);
-        resp.put("filename", original);
-        resp.put("url", ServletUriComponentsBuilder
-                .fromCurrentContextPath()
-                .path("/files/%s-%s".formatted(id, original)).build().toUriString());
-        return ResponseEntity.ok(resp);
     }
 
     @GetMapping
