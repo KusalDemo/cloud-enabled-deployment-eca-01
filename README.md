@@ -1,5 +1,8 @@
 # Cloud Enabled Deployment In Action with GCP
 
+### Video Recording
+https://drive.google.com/file/d/1P1lnrguO-KBCDM5VoNvmHWpsQx86Z9M9/view?usp=sharing
+
 This repository contains four projects:
 
 - course-service (Spring Boot + MySQL)
