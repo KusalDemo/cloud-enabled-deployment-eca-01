@@ -1,5 +1,11 @@
 # Cloud Enabled Deployment In Action with GCP
 
+Name : Y M K J S Gunasekara
+
+Student Id : 2301671001
+
+Email Address : kusalgunasekara2002@gmail.com
+
 ### Video Recording
 https://drive.google.com/file/d/1P1lnrguO-KBCDM5VoNvmHWpsQx86Z9M9/view?usp=sharing
 
@@ -225,7 +231,7 @@ When deploying to Cloud Run, set these environment variables:
 3. Choose **MySQL**
 4. Configure instance:
    - **Instance ID:** `course-db-instance`
-   - **Password:** `Solution@123`
+   - **Password:** `<your-password>`
    - **Database version:** `MySQL 8.0`
    - **Region:** `us-central1 (Iowa)`
    - **Zone:** `us-central1-c`
